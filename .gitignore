@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+backend/.venv/
+backend/__pycache__/
+
+# Environment variables
+.env
+.env.local
+backend/.env
+frontend/.env
+
+# Logs
+logs/
+*.log
+backend/logs/
+
+# Config
+backend/config/.fabric_converter_config.json
+
+# Build outputs
+frontend/dist/
+frontend/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DDL Output
+ddl_output/
+*.sql
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/

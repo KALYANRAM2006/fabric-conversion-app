@@ -1,0 +1,17 @@
+{
+  "name": "fabric-conversion-app",
+  "version": "1.0.0",
+  "description": "Oracle to Fabric DDL Converter with Claude AI",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm run dev",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "keywords": ["oracle", "fabric", "ddl", "converter", "claude-ai"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

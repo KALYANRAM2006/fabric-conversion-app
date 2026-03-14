@@ -1,16 +1,54 @@
 import React, { useState, useEffect } from 'react'
-import { CheckCircle, XCircle, Loader, ChevronRight, Database, Cloud, Bot } from 'lucide-react'
+import { CheckCircle, XCircle, Loader, ChevronRight, Database, Cloud, Bot, ChevronDown } from 'lucide-react'
 import * as api from '../services/api'
 
 function ConnectionConfig({ config, setConfig, onNext }) {
   const [loading, setLoading] = useState({})
   const [testResults, setTestResults] = useState({})
   const [saveMessage, setSaveMessage] = useState('')
+  const [availableDatabases, setAvailableDatabases] = useState([])
+  const [selectedDatabase, setSelectedDatabase] = useState('')
+  const [usePreset, setUsePreset] = useState(true)
+  const [fabricSchemas, setFabricSchemas] = useState(['APPL_STAR', 'caboodle', 'caboodle_staging', 'config', 'dbo', 'idmc_cdv'])
+  const [loadingSchemas, setLoadingSchemas] = useState(false)
 
-  // Load saved config on mount
+  // Load saved config and available databases on mount
   useEffect(() => {
     loadConfig()
+    loadDatabases()
   }, [])
+
+  const loadDatabases = async () => {
+    try {
+      const response = await api.getDatabases()
+      if (response.data?.databases) {
+        setAvailableDatabases(response.data.databases)
+      }
+    } catch (error) {
+      console.error('Error loading databases:', error)
+    }
+  }
+
+  const handleDatabaseSelect = async (dbKey) => {
+    setSelectedDatabase(dbKey)
+    setTestResults(prev => ({ ...prev, oracle: null }))
+
+    if (!dbKey) return
+
+    const db = availableDatabases.find(d => d.key === dbKey)
+    if (db) {
+      setConfig(prev => ({
+        ...prev,
+        oracle: {
+          ...prev.oracle,
+          user: db.user,
+          dsn: db.dsn,
+          schema: db.schema,
+          database_key: db.key,
+        }
+      }))
+    }
+  }
 
   const loadConfig = async () => {
     try {
@@ -45,16 +83,24 @@ function ConnectionConfig({ config, setConfig, onNext }) {
     try {
       let response
       if (type === 'oracle') {
-        response = await api.testOracleConnection({
-          user: config.oracle.user,
-          password: config.oracle.password,
-          dsn: config.oracle.dsn
-        })
+        if (usePreset && selectedDatabase) {
+          response = await api.testOraclePreset(selectedDatabase)
+        } else {
+          response = await api.testOracleConnection({
+            user: config.oracle.user,
+            password: config.oracle.password,
+            dsn: config.oracle.dsn
+          })
+        }
       } else if (type === 'fabric') {
         response = await api.testFabricConnection({
           server: config.fabric.server,
           database: config.fabric.database
         })
+        // If connection is successful, load schemas
+        if (response.data?.success) {
+          loadFabricSchemas()
+        }
       } else if (type === 'claude') {
         response = await api.testClaudeAPI(config.claudeApiKey)
       }
@@ -73,6 +119,27 @@ function ConnectionConfig({ config, setConfig, onNext }) {
       }))
     } finally {
       setLoading(prev => ({ ...prev, [type]: false }))
+    }
+  }
+
+  const loadFabricSchemas = async () => {
+    setLoadingSchemas(true)
+    try {
+      const response = await api.getFabricSchemas(
+        config.fabric.server,
+        config.fabric.database
+      )
+      if (response.data?.schemas) {
+        setFabricSchemas(response.data.schemas)
+        // If dbo exists in the list and current schema is empty, default to dbo
+        if (!config.fabric.schema && response.data.schemas.includes('dbo')) {
+          handleInputChange('fabric', 'schema', 'dbo')
+        }
+      }
+    } catch (error) {
+      console.error('Error loading Fabric schemas:', error)
+    } finally {
+      setLoadingSchemas(false)
     }
   }
 
@@ -111,64 +178,127 @@ function ConnectionConfig({ config, setConfig, onNext }) {
 
       {/* Oracle Configuration */}
       <div className="border rounded-lg p-6 bg-gray-50">
-        <div className="flex items-center mb-4">
-          <Database className="w-6 h-6 text-red-600 mr-2" />
-          <h3 className="text-lg font-semibold">Oracle Database</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Username
-            </label>
-            <input
-              type="text"
-              value={config.oracle.user}
-              onChange={(e) => handleInputChange('oracle', 'user', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="APPL_DATA_ADMIN"
-            />
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Database className="w-6 h-6 text-red-600 mr-2" />
+            <h3 className="text-lg font-semibold">Oracle Database</h3>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Password
+          <div className="flex items-center space-x-2">
+            <label className="text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={usePreset}
+                onChange={(e) => {
+                  setUsePreset(e.target.checked)
+                  setTestResults(prev => ({ ...prev, oracle: null }))
+                }}
+                className="mr-1"
+              />
+              Use preconfigured database
             </label>
-            <input
-              type="password"
-              value={config.oracle.password}
-              onChange={(e) => handleInputChange('oracle', 'password', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              DSN (host:port/service)
-            </label>
-            <input
-              type="text"
-              value={config.oracle.dsn}
-              onChange={(e) => handleInputChange('oracle', 'dsn', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="host:1521/service"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Schema
-            </label>
-            <input
-              type="text"
-              value={config.oracle.schema}
-              onChange={(e) => handleInputChange('oracle', 'schema', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="APPL_DATA_ADMIN"
-            />
           </div>
         </div>
+
+        {usePreset ? (
+          /* Preset Database Picker */
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Select Database
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedDatabase}
+                  onChange={(e) => handleDatabaseSelect(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none pr-10"
+                >
+                  <option value="">-- Select a database --</option>
+                  {availableDatabases.map(db => (
+                    <option key={db.key} value={db.key}>{db.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3 top-3 pointer-events-none" />
+              </div>
+            </div>
+
+            {selectedDatabase && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 rounded-md border">
+                <div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">User</span>
+                  <p className="text-sm text-gray-900 mt-1">{config.oracle.user}</p>
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">DSN</span>
+                  <p className="text-sm text-gray-900 mt-1 break-all">{config.oracle.dsn}</p>
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">Schema</span>
+                  <input
+                    type="text"
+                    value={config.oracle.schema}
+                    onChange={(e) => handleInputChange('oracle', 'schema', e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Manual Entry */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Username
+              </label>
+              <input
+                type="text"
+                value={config.oracle.user}
+                onChange={(e) => handleInputChange('oracle', 'user', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="APPL_DATA_ADMIN"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <input
+                type="password"
+                value={config.oracle.password}
+                onChange={(e) => handleInputChange('oracle', 'password', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                DSN (host:port/service)
+              </label>
+              <input
+                type="text"
+                value={config.oracle.dsn}
+                onChange={(e) => handleInputChange('oracle', 'dsn', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="host:1521/service"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Schema
+              </label>
+              <input
+                type="text"
+                value={config.oracle.schema}
+                onChange={(e) => handleInputChange('oracle', 'schema', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="APPL_DATA_ADMIN"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 flex items-center justify-between">
           <button
@@ -237,13 +367,33 @@ function ConnectionConfig({ config, setConfig, onNext }) {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Target Schema
             </label>
-            <input
-              type="text"
-              value={config.fabric.schema}
-              onChange={(e) => handleInputChange('fabric', 'schema', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="dbo"
-            />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <select
+                  value={config.fabric.schema}
+                  onChange={(e) => handleInputChange('fabric', 'schema', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none pr-10"
+                >
+                  <option value="">-- Select a schema --</option>
+                  {fabricSchemas.map(schema => (
+                    <option key={schema} value={schema}>{schema}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3 top-3 pointer-events-none" />
+              </div>
+              <button
+                onClick={loadFabricSchemas}
+                disabled={loadingSchemas || !config.fabric.server || !config.fabric.database}
+                className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 flex items-center whitespace-nowrap"
+                title="Load schemas from Fabric warehouse"
+              >
+                {loadingSchemas ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Refresh'
+                )}
+              </button>
+            </div>
           </div>
         </div>
 

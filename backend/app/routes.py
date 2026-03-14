@@ -1,7 +1,6 @@
-"""
-API Routes for Fabric Conversion App
-"""
+"""API Routes for Fabric Conversion App"""
 
+import os
 from flask import Blueprint, request, jsonify
 import logging
 from app.services.oracle_service import OracleService
@@ -15,12 +14,142 @@ logger = logging.getLogger(__name__)
 config_manager = ConfigManager()
 
 
+@api_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to verify backend is running"""
+    return jsonify({
+        'status': 'online',
+        'message': 'Backend server is running',
+        'port': int(os.getenv('PORT', 5001))
+    }), 200
+
+
+# Oracle database registry - reads from environment variables
+DATABASE_REGISTRY = {
+    'EDWP': {
+        'label': 'EDWP - Enterprise Data Warehouse Production',
+        'user_env': 'EDWP_USER',
+        'password_env': 'EDWP_PASSWORD',
+        'dsn_env': 'EDWP_DSN',
+        'schema_env': 'EDWP_SCHEMA',
+    },
+    'EDWDBP': {
+        'label': 'EDWDBP - Enterprise Data Warehouse DB Production',
+        'user_env': 'EDWDBP_USER',
+        'password_env': 'EDWDBP_PASSWORD',
+        'dsn_env': 'EDWDBP_DSN',
+        'schema_env': 'EDWDBP_SCHEMA',
+    },
+    'EDWT': {
+        'label': 'EDWT - Enterprise Data Warehouse Test',
+        'user_env': 'EDWT_USER',
+        'password_env': 'EDWT_PASSWORD',
+        'dsn_env': 'EDWT_DSN',
+        'schema_env': 'EDWT_SCHEMA',
+    },
+    'CLARITY': {
+        'label': 'CLARITY - Clarity Production (Read-Only)',
+        'user_env': 'CLARITY_USER',
+        'password_env': 'CLARITY_PASSWORD',
+        'dsn_env': 'CLARITY_DSN',
+        'schema_env': 'CLARITY_SCHEMA',
+    },
+    'EDWDBT': {
+        'label': 'EDWDBT - Enterprise Data Warehouse DB Test',
+        'user_env': 'EDWDBT_USER',
+        'password_env': 'EDWDBT_PASSWORD',
+        'dsn_env': 'EDWDBT_DSN',
+        'schema_env': 'EDWDBT_SCHEMA',
+    },
+}
+
+
+def get_database_credentials(db_key):
+    """Get database credentials from environment variables"""
+    db_info = DATABASE_REGISTRY.get(db_key)
+    if not db_info:
+        return None
+    return {
+        'user': os.getenv(db_info['user_env'], ''),
+        'password': os.getenv(db_info['password_env'], ''),
+        'dsn': os.getenv(db_info['dsn_env'], ''),
+        'schema': os.getenv(db_info['schema_env'], ''),
+    }
+
+
+@api_bp.route('/databases', methods=['GET'])
+def get_databases():
+    """Get list of available Oracle databases configured in .env"""
+    try:
+        databases = []
+        for key, info in DATABASE_REGISTRY.items():
+            # Only include databases that have credentials configured
+            user = os.getenv(info['user_env'], '')
+            dsn = os.getenv(info['dsn_env'], '')
+            if user and dsn:
+                databases.append({
+                    'key': key,
+                    'label': info['label'],
+                    'user': user,
+                    'dsn': dsn,
+                    'schema': os.getenv(info['schema_env'], ''),
+                })
+        return jsonify({'databases': databases}), 200
+    except Exception as e:
+        logger.error(f"Error getting databases: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/databases/<db_key>/credentials', methods=['GET'])
+def get_database_creds(db_key):
+    """Get credentials for a specific database (password masked)"""
+    try:
+        creds = get_database_credentials(db_key)
+        if not creds:
+            return jsonify({'error': f'Database {db_key} not found'}), 404
+        return jsonify({
+            'user': creds['user'],
+            'dsn': creds['dsn'],
+            'schema': creds['schema'],
+            'hasPassword': bool(creds['password']),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting database credentials: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/test-oracle-preset', methods=['POST'])
+def test_oracle_preset():
+    """Test Oracle connection using a preconfigured database from .env"""
+    try:
+        data = request.json
+        db_key = data.get('database_key')
+        creds = get_database_credentials(db_key)
+        if not creds:
+            return jsonify({'success': False, 'error': f'Database {db_key} not configured'}), 400
+
+        oracle_service = OracleService(
+            user=creds['user'],
+            password=creds['password'],
+            dsn=creds['dsn']
+        )
+        success, message = oracle_service.test_connection()
+
+        if success:
+            return jsonify({'success': True, 'message': message}), 200
+        else:
+            return jsonify({'success': False, 'error': message}), 400
+    except Exception as e:
+        logger.error(f"Oracle preset test failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/config', methods=['GET'])
 def get_config():
     """Get saved configuration (without sensitive data)"""
     try:
         config = config_manager.get_config()
-        # Remove sensitive data
+        # Remove sensitive data, fall back to .env for Fabric defaults
         safe_config = {
             'oracle': {
                 'user': config.get('oracle', {}).get('user', ''),
@@ -28,11 +157,11 @@ def get_config():
                 'schema': config.get('oracle', {}).get('schema', ''),
             },
             'fabric': {
-                'server': config.get('fabric', {}).get('server', ''),
-                'database': config.get('fabric', {}).get('database', ''),
-                'schema': config.get('fabric', {}).get('schema', 'dbo'),
+                'server': config.get('fabric', {}).get('server', '') or os.getenv('FABRIC_SERVER', ''),
+                'database': config.get('fabric', {}).get('database', '') or os.getenv('FABRIC_DATABASE', ''),
+                'schema': config.get('fabric', {}).get('schema', '') or os.getenv('FABRIC_SCHEMA', 'dbo'),
             },
-            'hasClaudeKey': bool(config.get('claude', {}).get('api_key'))
+            'hasClaudeKey': bool(config.get('claude', {}).get('api_key') or os.getenv('ANTHROPIC_API_KEY', '').strip())
         }
         return jsonify(safe_config), 200
     except Exception as e:
@@ -97,12 +226,36 @@ def test_fabric():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@api_bp.route('/fabric-schemas', methods=['POST'])
+def get_fabric_schemas():
+    """Get available schemas from Fabric Data Warehouse"""
+    try:
+        data = request.json
+        fabric_service = FabricService(
+            server=data.get('server'),
+            database=data.get('database')
+        )
+
+        success, message, schemas = fabric_service.get_schemas()
+
+        if success:
+            return jsonify({'success': True, 'schemas': schemas}), 200
+        else:
+            return jsonify({'success': False, 'error': message}), 400
+
+    except Exception as e:
+        logger.error(f"Error getting Fabric schemas: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @api_bp.route('/test-claude', methods=['POST'])
 def test_claude():
     """Test Claude API connection"""
     try:
         data = request.json
-        claude_service = ClaudeService(api_key=data.get('api_key'))
+        api_key = data.get('api_key') or os.getenv('ANTHROPIC_API_KEY')
+        base_url = os.getenv('ANTHROPIC_BASE_URL')
+        claude_service = ClaudeService(api_key=api_key, base_url=base_url)
 
         success, message = claude_service.test_connection()
 
@@ -121,11 +274,24 @@ def get_tables(schema):
     """Get list of tables from Oracle schema"""
     try:
         data = request.json
-        oracle_service = OracleService(
-            user=data.get('user'),
-            password=data.get('password'),
-            dsn=data.get('dsn')
-        )
+
+        # Support preset database selection
+        db_key = data.get('database_key')
+        if db_key:
+            creds = get_database_credentials(db_key)
+            if not creds:
+                return jsonify({'error': f'Database {db_key} not configured'}), 400
+            oracle_service = OracleService(
+                user=creds['user'],
+                password=creds['password'],
+                dsn=creds['dsn']
+            )
+        else:
+            oracle_service = OracleService(
+                user=data.get('user'),
+                password=data.get('password'),
+                dsn=data.get('dsn')
+            )
 
         tables = oracle_service.get_tables(schema)
 
@@ -141,11 +307,24 @@ def extract_ddl():
     """Extract Oracle DDL for specified tables"""
     try:
         data = request.json
-        oracle_service = OracleService(
-            user=data.get('oracle', {}).get('user'),
-            password=data.get('oracle', {}).get('password'),
-            dsn=data.get('oracle', {}).get('dsn')
-        )
+
+        # Support preset database selection
+        db_key = data.get('database_key')
+        if db_key:
+            creds = get_database_credentials(db_key)
+            if not creds:
+                return jsonify({'error': f'Database {db_key} not configured'}), 400
+            oracle_service = OracleService(
+                user=creds['user'],
+                password=creds['password'],
+                dsn=creds['dsn']
+            )
+        else:
+            oracle_service = OracleService(
+                user=data.get('oracle', {}).get('user'),
+                password=data.get('oracle', {}).get('password'),
+                dsn=data.get('oracle', {}).get('dsn')
+            )
 
         schema = data.get('schema')
         tables = data.get('tables', [])
@@ -168,13 +347,16 @@ def convert_ddl():
     """Convert Oracle DDL to Fabric DDL using Claude API"""
     try:
         data = request.json
-        claude_service = ClaudeService(api_key=data.get('claude_api_key'))
+        api_key = data.get('claude_api_key') or os.getenv('ANTHROPIC_API_KEY')
+        base_url = os.getenv('ANTHROPIC_BASE_URL')
+        custom_instructions = data.get('custom_instructions', '')
+        claude_service = ClaudeService(api_key=api_key, base_url=base_url)
 
         oracle_ddl_dict = data.get('oracle_ddl', {})
         results = {}
 
         for table_name, oracle_ddl in oracle_ddl_dict.items():
-            fabric_ddl = claude_service.convert_ddl(oracle_ddl)
+            fabric_ddl = claude_service.convert_ddl(oracle_ddl, custom_instructions=custom_instructions)
             if fabric_ddl:
                 results[table_name] = fabric_ddl
 
@@ -190,9 +372,12 @@ def create_table():
     """Create table in Fabric Data Warehouse"""
     try:
         data = request.json
+        server = data.get('fabric', {}).get('server') or os.getenv('FABRIC_SERVER', '')
+        database = data.get('fabric', {}).get('database') or os.getenv('FABRIC_DATABASE', '')
+        logger.info(f"Creating table - server={server[:30]}... db={database}")
         fabric_service = FabricService(
-            server=data.get('fabric', {}).get('server'),
-            database=data.get('fabric', {}).get('database')
+            server=server,
+            database=database
         )
 
         schema = data.get('schema', 'dbo')
@@ -216,9 +401,12 @@ def create_tables_batch():
     """Create multiple tables in Fabric Data Warehouse"""
     try:
         data = request.json
+        server = data.get('fabric', {}).get('server') or os.getenv('FABRIC_SERVER', '')
+        database = data.get('fabric', {}).get('database') or os.getenv('FABRIC_DATABASE', '')
+        logger.info(f"Batch create - server={server[:30]}... db={database}")
         fabric_service = FabricService(
-            server=data.get('fabric', {}).get('server'),
-            database=data.get('fabric', {}).get('database')
+            server=server,
+            database=database
         )
 
         schema = data.get('schema', 'dbo')

@@ -18,11 +18,16 @@ function TableBrowser({ config, selectedTables, setSelectedTables, oracleDDL, se
     setError('')
 
     try {
-      const response = await api.getTables(config.oracle.schema, {
-        user: config.oracle.user,
-        password: config.oracle.password,
-        dsn: config.oracle.dsn
-      })
+      let response
+      if (config.oracle.database_key) {
+        response = await api.getTablesPreset(config.oracle.schema, config.oracle.database_key)
+      } else {
+        response = await api.getTables(config.oracle.schema, {
+          user: config.oracle.user,
+          password: config.oracle.password,
+          dsn: config.oracle.dsn
+        })
+      }
 
       setTables(response.data.tables || [])
     } catch (err) {
@@ -62,15 +67,20 @@ function TableBrowser({ config, selectedTables, setSelectedTables, oracleDDL, se
     setError('')
 
     try {
-      const response = await api.extractDDL({
-        oracle: {
+      const payload = {
+        schema: config.oracle.schema,
+        tables: selectedTables
+      }
+      if (config.oracle.database_key) {
+        payload.database_key = config.oracle.database_key
+      } else {
+        payload.oracle = {
           user: config.oracle.user,
           password: config.oracle.password,
           dsn: config.oracle.dsn
-        },
-        schema: config.oracle.schema,
-        tables: selectedTables
-      })
+        }
+      }
+      const response = await api.extractDDL(payload)
 
       setOracleDDL(response.data.ddl || {})
       onNext()

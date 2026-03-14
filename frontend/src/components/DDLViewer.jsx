@@ -1,6 +1,19 @@
 import React, { useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader, FileCode, Sparkles, Edit, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader, FileCode, Sparkles, Edit, Save, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react'
 import * as api from '../services/api'
+
+const DEFAULT_INSTRUCTIONS = `- No DEFAULT keyword in CREATE TABLE (Fabric does not support column defaults)
+- PRIMARY KEY must NOT be inside CREATE TABLE. Generate a SEPARATE ALTER TABLE after each CREATE TABLE:
+    ALTER TABLE schema.table ADD CONSTRAINT PK_table PRIMARY KEY NONCLUSTERED (col) NOT ENFORCED;
+- NONCLUSTERED and NOT ENFORCED are both REQUIRED on every PRIMARY KEY
+- DATETIME2 must ALWAYS have explicit precision 0-6. Use DATETIME2(6) as default. Never use bare DATETIME2 or DATETIME2(7)+
+- Oracle TIMESTAMP or TIMESTAMP(n) → DATETIME2(6)
+- No FOREIGN KEY constraints
+- No CHECK constraints
+- No SEQUENCE or IDENTITY unless explicitly needed
+- No computed columns
+- Use VARCHAR(n) instead of NVARCHAR(n) — Fabric only supports NVARCHAR(MAX), not sized NVARCHAR
+- NVARCHAR(MAX) is allowed, but NVARCHAR(30) etc. is NOT`
 
 function DDLViewer({ config, oracleDDL, fabricDDL, setFabricDDL, onNext, onBack }) {
   const [converting, setConverting] = useState(false)
@@ -8,6 +21,8 @@ function DDLViewer({ config, oracleDDL, fabricDDL, setFabricDDL, onNext, onBack 
   const [selectedTable, setSelectedTable] = useState(Object.keys(oracleDDL)[0] || '')
   const [editMode, setEditMode] = useState({})
   const [editedDDL, setEditedDDL] = useState({})
+  const [customInstructions, setCustomInstructions] = useState(DEFAULT_INSTRUCTIONS)
+  const [showInstructions, setShowInstructions] = useState(false)
 
   const tables = Object.keys(oracleDDL)
 
@@ -16,7 +31,7 @@ function DDLViewer({ config, oracleDDL, fabricDDL, setFabricDDL, onNext, onBack 
     setError('')
 
     try {
-      const response = await api.convertDDL(oracleDDL, config.claudeApiKey)
+      const response = await api.convertDDL(oracleDDL, config.claudeApiKey, customInstructions)
       setFabricDDL(response.data.fabric_ddl || {})
     } catch (err) {
       setError(err.response?.data?.error || err.message)
@@ -162,28 +177,66 @@ function DDLViewer({ config, oracleDDL, fabricDDL, setFabricDDL, onNext, onBack 
         </div>
       )}
 
-      {/* Convert Button */}
-      {!hasFabricDDL && (
-        <div className="flex justify-center py-6">
-          <button
-            onClick={handleConvert}
-            disabled={converting}
-            className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center text-lg font-semibold shadow-lg"
-          >
-            {converting ? (
-              <>
-                <Loader className="w-5 h-5 mr-3 animate-spin" />
-                Converting with Claude AI...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-5 h-5 mr-3" />
-                Convert with Claude AI
-              </>
-            )}
-          </button>
-        </div>
-      )}
+      {/* Custom Instructions for Claude */}
+      <div className="border rounded-lg overflow-hidden">
+        <button
+          onClick={() => setShowInstructions(!showInstructions)}
+          className="w-full px-4 py-3 bg-amber-50 border-b flex items-center justify-between hover:bg-amber-100 transition-colors"
+        >
+          <div className="flex items-center">
+            <MessageSquare className="w-5 h-5 mr-2 text-amber-600" />
+            <h3 className="font-semibold text-amber-900">Custom Instructions for Claude</h3>
+          </div>
+          {showInstructions ? (
+            <ChevronUp className="w-5 h-5 text-amber-600" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-amber-600" />
+          )}
+        </button>
+        {showInstructions && (
+          <div className="p-4 bg-white">
+            <p className="text-sm text-gray-600 mb-2">
+              Add specific rules or constraints for Claude to follow when converting DDL.
+              These will be included in the conversion prompt.
+            </p>
+            <textarea
+              value={customInstructions}
+              onChange={(e) => setCustomInstructions(e.target.value)}
+              placeholder="e.g., No DEFAULT keyword, use NVARCHAR instead of VARCHAR..."
+              className="w-full h-40 border border-gray-300 rounded-md p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+            />
+            <div className="mt-2 flex justify-end">
+              <button
+                onClick={() => setCustomInstructions(DEFAULT_INSTRUCTIONS)}
+                className="text-xs text-amber-600 hover:text-amber-700"
+              >
+                Reset to Defaults
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Convert / Re-convert Button */}
+      <div className="flex justify-center py-4">
+        <button
+          onClick={handleConvert}
+          disabled={converting}
+          className="px-8 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center text-lg font-semibold shadow-lg"
+        >
+          {converting ? (
+            <>
+              <Loader className="w-5 h-5 mr-3 animate-spin" />
+              Converting with Claude AI...
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-5 h-5 mr-3" />
+              {hasFabricDDL ? 'Re-convert with Claude AI' : 'Convert with Claude AI'}
+            </>
+          )}
+        </button>
+      </div>
 
       {/* Conversion Stats */}
       {hasFabricDDL && (

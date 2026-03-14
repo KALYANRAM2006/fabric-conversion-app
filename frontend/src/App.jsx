@@ -1,20 +1,39 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import ConnectionConfig from './components/ConnectionConfig'
 import TableBrowser from './components/TableBrowser'
 import DDLViewer from './components/DDLViewer'
 import ExecutionPanel from './components/ExecutionPanel'
-import { Database, Workflow, FileCode, PlayCircle } from 'lucide-react'
+import { Database, Workflow, FileCode, PlayCircle, Circle, RefreshCw } from 'lucide-react'
+import * as api from './services/api'
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1)
+  const [serverStatus, setServerStatus] = useState('checking') // 'online', 'offline', 'checking'
   const [config, setConfig] = useState({
-    oracle: { user: '', password: '', dsn: '', schema: '' },
+    oracle: { user: '', password: '', dsn: '', schema: '', database_key: '' },
     fabric: { server: '', database: '', schema: 'dbo' },
     claudeApiKey: ''
   })
   const [selectedTables, setSelectedTables] = useState([])
   const [oracleDDL, setOracleDDL] = useState({})
   const [fabricDDL, setFabricDDL] = useState({})
+
+  const checkServerHealth = useCallback(async () => {
+    try {
+      setServerStatus('checking')
+      await api.checkHealth()
+      setServerStatus('online')
+    } catch {
+      setServerStatus('offline')
+    }
+  }, [])
+
+  // Poll server health every 10 seconds
+  useEffect(() => {
+    checkServerHealth()
+    const interval = setInterval(checkServerHealth, 10000)
+    return () => clearInterval(interval)
+  }, [checkServerHealth])
 
   const steps = [
     { id: 1, name: 'Configuration', icon: Database },
@@ -37,7 +56,33 @@ function App() {
                 AI-Powered Database Migration Tool
               </p>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-3">
+              {/* Server Status Indicator */}
+              <div className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border ${
+                serverStatus === 'online'
+                  ? 'bg-green-50 text-green-700 border-green-200'
+                  : serverStatus === 'checking'
+                  ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                  : 'bg-red-50 text-red-700 border-red-200'
+              }`}>
+                <Circle className={`w-2.5 h-2.5 mr-1.5 fill-current ${
+                  serverStatus === 'online'
+                    ? 'text-green-500'
+                    : serverStatus === 'checking'
+                    ? 'text-yellow-500 animate-pulse'
+                    : 'text-red-500'
+                }`} />
+                {serverStatus === 'online' ? 'Server Online' : serverStatus === 'checking' ? 'Checking...' : 'Server Offline'}
+                {serverStatus === 'offline' && (
+                  <button
+                    onClick={checkServerHealth}
+                    className="ml-2 p-0.5 hover:bg-red-100 rounded"
+                    title="Retry connection"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                 Powered by Claude AI
               </span>
@@ -45,6 +90,29 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* Offline Banner */}
+      {serverStatus === 'offline' && (
+        <div className="bg-red-50 border-b border-red-200">
+          <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <Circle className="w-3 h-3 text-red-500 fill-current mr-2" />
+                <p className="text-sm text-red-700">
+                  <strong>Backend server is offline.</strong> Start it by running: <code className="bg-red-100 px-2 py-0.5 rounded text-xs font-mono">cd backend &amp;&amp; py run.py</code>
+                </p>
+              </div>
+              <button
+                onClick={checkServerHealth}
+                className="flex items-center px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress Steps */}
       <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">

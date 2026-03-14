@@ -3,10 +3,114 @@ Fabric Data Warehouse Service
 Handles Fabric connections and DDL execution
 """
 
+import struct
+import os
+import json
+import re
+import time
+import subprocess
 import pyodbc
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Token cache to avoid repeated Azure CLI calls
+_token_cache = {
+    "token": None,
+    "expires_on": 0,
+}
+
+# Known az.cmd locations on Windows
+_AZ_CMD_PATHS = [
+    r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+]
+
+
+def _find_az_cmd():
+    """Find the az.cmd executable on Windows"""
+    for path in _AZ_CMD_PATHS:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _get_token_via_subprocess():
+    """Get Azure AD token by directly invoking az.cmd with full path"""
+    az_cmd = _find_az_cmd()
+    if not az_cmd:
+        raise Exception(f"az.cmd not found in known paths: {_AZ_CMD_PATHS}")
+
+    logger.info(f"Getting token via subprocess: {az_cmd}")
+    result = subprocess.run(
+        [az_cmd, "account", "get-access-token", "--resource", "https://database.windows.net"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"az CLI failed (exit {result.returncode}): {result.stderr}")
+
+    token_data = json.loads(result.stdout)
+    return token_data["accessToken"], token_data.get("expiresOn", "")
+
+
+def _get_fabric_token():
+    """Get an Azure AD access token for Fabric/SQL, with caching"""
+    global _token_cache
+
+    # Return cached token if still valid (with 5-minute buffer)
+    if _token_cache["token"] and _token_cache["expires_on"] > time.time() + 300:
+        logger.info("Using cached Fabric token")
+        return _token_cache["token"]
+
+    # Primary: direct subprocess call to az.cmd (most reliable on Windows)
+    try:
+        token, expires_on_str = _get_token_via_subprocess()
+        # Parse expiry - az CLI returns ISO format datetime
+        try:
+            from datetime import datetime
+            expires_dt = datetime.fromisoformat(expires_on_str.replace("Z", "+00:00"))
+            _token_cache["expires_on"] = expires_dt.timestamp()
+        except Exception:
+            # If we can't parse expiry, cache for 30 minutes
+            _token_cache["expires_on"] = time.time() + 1800
+        _token_cache["token"] = token
+        logger.info("Got Fabric token via az.cmd subprocess")
+        return token
+    except Exception as e:
+        logger.warning(f"Subprocess token fetch failed: {e}, trying AzureCliCredential...")
+
+    # Fallback: AzureCliCredential (may fail intermittently on Windows)
+    try:
+        from azure.identity import AzureCliCredential
+        # Ensure Azure CLI is on PATH
+        az_cli_dirs = [
+            r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin",
+            r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin",
+        ]
+        current_path = os.environ.get("PATH", "")
+        for p in az_cli_dirs:
+            if os.path.isdir(p) and p not in current_path:
+                os.environ["PATH"] = p + os.pathsep + current_path
+                current_path = os.environ["PATH"]
+
+        credential = AzureCliCredential()
+        token_obj = credential.get_token("https://database.windows.net/.default")
+        _token_cache["token"] = token_obj.token
+        _token_cache["expires_on"] = token_obj.expires_on
+        logger.info("Got Fabric token via AzureCliCredential fallback")
+        return token_obj.token
+    except Exception as e2:
+        raise Exception(f"All token methods failed. Subprocess: {e}, AzureCliCredential: {e2}")
+
+
+def _token_bytes(token_str):
+    """Convert a token string to the bytes format pyodbc expects for SQL_COPT_SS_ACCESS_TOKEN"""
+    token_bytes = token_str.encode("UTF-16-LE")
+    token_struct = struct.pack(f'<I{len(token_bytes)}s', len(token_bytes), token_bytes)
+    return token_struct
 
 
 class FabricService:
@@ -16,18 +120,27 @@ class FabricService:
         self.connection = None
 
     def connect(self):
-        """Establish Fabric connection using Azure AD Interactive"""
+        """Establish Fabric connection using Azure CLI token"""
         try:
+            # Get access token from Azure CLI
+            logger.info("Getting Azure AD token via Azure CLI...")
+            access_token = _get_fabric_token()
+
             connection_string = (
                 f"DRIVER={{ODBC Driver 18 for SQL Server}};"
                 f"SERVER={self.server};"
                 f"DATABASE={self.database};"
-                f"Authentication=ActiveDirectoryInteractive;"
                 f"Encrypt=yes;"
                 f"TrustServerCertificate=no;"
             )
 
-            self.connection = pyodbc.connect(connection_string)
+            # Use token-based auth (SQL_COPT_SS_ACCESS_TOKEN = 1256)
+            SQL_COPT_SS_ACCESS_TOKEN = 1256
+            self.connection = pyodbc.connect(
+                connection_string,
+                attrs_before={SQL_COPT_SS_ACCESS_TOKEN: _token_bytes(access_token)},
+                timeout=30
+            )
             return True, "Connected successfully"
 
         except Exception as e:
@@ -57,12 +170,40 @@ class FabricService:
                 return False, f"Query failed: {str(e)}"
         return False, message
 
+    def get_schemas(self):
+        """Get all available schemas from Fabric warehouse"""
+        try:
+            success, msg = self.connect()
+            if not success:
+                return False, msg, []
+
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT s.name
+                FROM sys.schemas s
+                INNER JOIN sys.database_principals p ON s.principal_id = p.principal_id
+                ORDER BY s.name
+            """)
+            schemas = [row[0] for row in cursor.fetchall()]
+            cursor.close()
+            self.disconnect()
+            return True, 'Schemas retrieved successfully', schemas
+
+        except Exception as e:
+            self.disconnect()
+            logger.error(f"Error getting schemas: {e}")
+            return False, str(e), []
+
     def execute_ddl(self, ddl, schema, table_name):
         """Execute DDL in Fabric"""
         try:
-            success, _ = self.connect()
+            success, msg = self.connect()
             if not success:
-                raise Exception("Failed to connect to Fabric")
+                raise Exception(f"Failed to connect to Fabric: {msg}")
+
+            # Fabric uses snapshot isolation — DDL is not allowed inside transactions.
+            # Enable autocommit so each statement runs outside a transaction.
+            self.connection.autocommit = True
 
             cursor = self.connection.cursor()
 
@@ -72,19 +213,25 @@ class FabricService:
                     IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{schema}')
                     EXEC('CREATE SCHEMA {schema}')
                 """)
-                self.connection.commit()
 
                 # Drop table if exists
                 cursor.execute(f"DROP TABLE IF EXISTS {schema}.{table_name}")
-                self.connection.commit()
 
-                # Execute DDL statements
-                statements = [stmt.strip() for stmt in ddl.split(';') if stmt.strip()]
+                # Execute DDL statements one at a time
+                # Split on semicolons but also handle GO batch separators
+                raw_statements = ddl.split(';')
+                statements = []
+                for s in raw_statements:
+                    # Split on GO batch separator (standalone line)
+                    parts = re.split(r'(?m)^\s*GO\s*$', s)
+                    for p in parts:
+                        cleaned = p.strip()
+                        if cleaned and cleaned.upper() != 'GO':
+                            statements.append(cleaned)
 
                 for stmt in statements:
-                    if stmt:
-                        cursor.execute(stmt)
-                        self.connection.commit()
+                    logger.info(f"Executing: {stmt[:120]}...")
+                    cursor.execute(stmt)
 
                 cursor.close()
                 self.disconnect()
@@ -93,10 +240,6 @@ class FabricService:
                 return True, f"Table {schema}.{table_name} created successfully"
 
             except Exception as e:
-                try:
-                    self.connection.rollback()
-                except:
-                    pass
                 cursor.close()
                 self.disconnect()
                 raise e

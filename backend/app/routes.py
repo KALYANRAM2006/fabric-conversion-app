@@ -61,6 +61,20 @@ DATABASE_REGISTRY = {
         'dsn_env': 'EDWDBT_DSN',
         'schema_env': 'EDWDBT_SCHEMA',
     },
+    'EDWD': {
+        'label': 'EDWD - Enterprise Data Warehouse Development',
+        'user_env': 'EDWD_USER',
+        'password_env': 'EDWD_PASSWORD',
+        'dsn_env': 'EDWD_DSN',
+        'schema_env': 'EDWD_SCHEMA',
+    },
+    'EDWDBD': {
+        'label': 'EDWDBD - Enterprise Data Warehouse DB Development',
+        'user_env': 'EDWDBD_USER',
+        'password_env': 'EDWDBD_PASSWORD',
+        'dsn_env': 'EDWDBD_DSN',
+        'schema_env': 'EDWDBD_SCHEMA',
+    },
 }
 
 

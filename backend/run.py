@@ -19,7 +19,7 @@ if __name__ == '__main__':
     host = os.getenv('HOST', '0.0.0.0')
     debug = os.getenv('DEBUG', 'False').lower() == 'true'
 
-    print(f"🚀 Starting Fabric Conversion App Backend")
+    print(f"Starting Fabric Conversion App Backend")
     print(f"   Server: http://{host}:{port}")
     print(f"   Debug: {debug}")
     print(f"   Press CTRL+C to quit")

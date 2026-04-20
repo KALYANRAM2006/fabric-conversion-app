@@ -65,6 +65,9 @@ def _get_fabric_token():
         logger.info("Using cached Fabric token")
         return _token_cache["token"]
 
+    first_error = None
+    second_error = None
+
     # Primary: direct subprocess call to az.cmd (most reliable on Windows)
     try:
         token, expires_on_str = _get_token_via_subprocess()
@@ -80,9 +83,10 @@ def _get_fabric_token():
         logger.info("Got Fabric token via az.cmd subprocess")
         return token
     except Exception as e:
+        first_error = e
         logger.warning(f"Subprocess token fetch failed: {e}, trying AzureCliCredential...")
 
-    # Fallback: AzureCliCredential (may fail intermittently on Windows)
+    # Fallback 1: AzureCliCredential
     try:
         from azure.identity import AzureCliCredential
         # Ensure Azure CLI is on PATH
@@ -100,10 +104,23 @@ def _get_fabric_token():
         token_obj = credential.get_token("https://database.windows.net/.default")
         _token_cache["token"] = token_obj.token
         _token_cache["expires_on"] = token_obj.expires_on
-        logger.info("Got Fabric token via AzureCliCredential fallback")
+        logger.info("Got Fabric token via AzureCliCredential")
         return token_obj.token
     except Exception as e2:
-        raise Exception(f"All token methods failed. Subprocess: {e}, AzureCliCredential: {e2}")
+        second_error = e2
+        logger.warning(f"AzureCliCredential failed: {e2}, trying InteractiveBrowserCredential...")
+
+    # Fallback 2: InteractiveBrowserCredential (opens browser for interactive login)
+    try:
+        from azure.identity import InteractiveBrowserCredential
+        credential = InteractiveBrowserCredential()
+        token_obj = credential.get_token("https://database.windows.net/.default")
+        _token_cache["token"] = token_obj.token
+        _token_cache["expires_on"] = token_obj.expires_on
+        logger.info("Got Fabric token via InteractiveBrowserCredential")
+        return token_obj.token
+    except Exception as e3:
+        raise Exception(f"All token methods failed. Subprocess: {first_error}, AzureCliCredential: {second_error}, InteractiveBrowserCredential: {e3}")
 
 
 def _token_bytes(token_str):

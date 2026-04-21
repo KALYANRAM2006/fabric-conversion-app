@@ -13,7 +13,8 @@ const DEFAULT_INSTRUCTIONS = `- No DEFAULT keyword in CREATE TABLE (Fabric does 
 - No SEQUENCE or IDENTITY unless explicitly needed
 - No computed columns
 - Use VARCHAR(n) instead of NVARCHAR(n) — Fabric only supports NVARCHAR(MAX), not sized NVARCHAR
-- NVARCHAR(MAX) is allowed, but NVARCHAR(30) etc. is NOT`
+- NVARCHAR(MAX) is allowed, but NVARCHAR(30) etc. is NOT
+- _SK columns should always in BIGINT while converting to Fabric (Adding this statement is consistently generating bigint for all the sk)`
 
 function DDLViewer({ config, oracleDDL, fabricDDL, setFabricDDL, onNext, onBack }) {
   const [converting, setConverting] = useState(false)

@@ -466,13 +466,9 @@ def compare_columns():
             # Use provided Fabric server/database or fall back to environment
             fabric_server = left.get('fabricServer') or os.getenv('FABRIC_SERVER')
             fabric_database = left.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
-            fabric_username = left.get('fabricUsername') or os.getenv('FABRIC_USERNAME')
-            fabric_password = left.get('fabricPassword') or os.getenv('FABRIC_PASSWORD')
             left_fabric = FabricService(
                 server=fabric_server,
-                database=fabric_database,
-                username=fabric_username,
-                password=fabric_password
+                database=fabric_database
             )
             left_columns = left_fabric.get_table_columns(left.get('schema'), left.get('table'))
 
@@ -492,13 +488,9 @@ def compare_columns():
             # Use provided Fabric server/database or fall back to environment
             fabric_server = right.get('fabricServer') or os.getenv('FABRIC_SERVER')
             fabric_database = right.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
-            fabric_username = right.get('fabricUsername') or os.getenv('FABRIC_USERNAME')
-            fabric_password = right.get('fabricPassword') or os.getenv('FABRIC_PASSWORD')
             right_fabric = FabricService(
                 server=fabric_server,
-                database=fabric_database,
-                username=fabric_username,
-                password=fabric_password
+                database=fabric_database
             )
             right_columns = right_fabric.get_table_columns(right.get('schema'), right.get('table'))
 

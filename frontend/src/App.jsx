@@ -3,10 +3,12 @@ import ConnectionConfig from './components/ConnectionConfig'
 import TableBrowser from './components/TableBrowser'
 import DDLViewer from './components/DDLViewer'
 import ExecutionPanel from './components/ExecutionPanel'
-import { Database, Workflow, FileCode, PlayCircle, Circle, RefreshCw } from 'lucide-react'
+import ColumnCompare from './components/ColumnCompare'
+import { Database, Workflow, FileCode, PlayCircle, Circle, RefreshCw, GitCompare } from 'lucide-react'
 import * as api from './services/api'
 
 function App() {
+  const [currentMode, setCurrentMode] = useState('converter') // 'converter' or 'compare'
   const [currentStep, setCurrentStep] = useState(1)
   const [serverStatus, setServerStatus] = useState('checking') // 'online', 'offline', 'checking'
   const [config, setConfig] = useState({
@@ -114,9 +116,38 @@ function App() {
         </div>
       )}
 
-      {/* Progress Steps */}
-      <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <nav aria-label="Progress">
+      {/* Mode Selector Tabs */}
+      <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex gap-2 border-b border-gray-200">
+          <button
+            onClick={() => setCurrentMode('converter')}
+            className={`flex items-center gap-2 px-6 py-3 font-medium text-sm border-b-2 transition-colors ${
+              currentMode === 'converter'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <Database className="w-5 h-5" />
+            DDL Converter
+          </button>
+          <button
+            onClick={() => setCurrentMode('compare')}
+            className={`flex items-center gap-2 px-6 py-3 font-medium text-sm border-b-2 transition-colors ${
+              currentMode === 'compare'
+                ? 'border-purple-600 text-purple-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <GitCompare className="w-5 h-5" />
+            Column Compare
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Steps - Only show in converter mode */}
+      {currentMode === 'converter' && (
+        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+          <nav aria-label="Progress">
           <ol className="flex items-center justify-between">
             {steps.map((step, index) => (
               <li key={step.id} className="relative flex-1">
@@ -149,49 +180,54 @@ function App() {
           </ol>
         </nav>
       </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 pb-12 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          {currentStep === 1 && (
-            <ConnectionConfig
-              config={config}
-              setConfig={setConfig}
-              onNext={() => setCurrentStep(2)}
-            />
-          )}
+        {currentMode === 'converter' ? (
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            {currentStep === 1 && (
+              <ConnectionConfig
+                config={config}
+                setConfig={setConfig}
+                onNext={() => setCurrentStep(2)}
+              />
+            )}
 
-          {currentStep === 2 && (
-            <TableBrowser
-              config={config}
-              selectedTables={selectedTables}
-              setSelectedTables={setSelectedTables}
-              oracleDDL={oracleDDL}
-              setOracleDDL={setOracleDDL}
-              onNext={() => setCurrentStep(3)}
-              onBack={() => setCurrentStep(1)}
-            />
-          )}
+            {currentStep === 2 && (
+              <TableBrowser
+                config={config}
+                selectedTables={selectedTables}
+                setSelectedTables={setSelectedTables}
+                oracleDDL={oracleDDL}
+                setOracleDDL={setOracleDDL}
+                onNext={() => setCurrentStep(3)}
+                onBack={() => setCurrentStep(1)}
+              />
+            )}
 
-          {currentStep === 3 && (
-            <DDLViewer
-              config={config}
-              oracleDDL={oracleDDL}
-              fabricDDL={fabricDDL}
-              setFabricDDL={setFabricDDL}
-              onNext={() => setCurrentStep(4)}
-              onBack={() => setCurrentStep(2)}
-            />
-          )}
+            {currentStep === 3 && (
+              <DDLViewer
+                config={config}
+                oracleDDL={oracleDDL}
+                fabricDDL={fabricDDL}
+                setFabricDDL={setFabricDDL}
+                onNext={() => setCurrentStep(4)}
+                onBack={() => setCurrentStep(2)}
+              />
+            )}
 
-          {currentStep === 4 && (
-            <ExecutionPanel
-              config={config}
-              fabricDDL={fabricDDL}
-              onBack={() => setCurrentStep(3)}
-            />
-          )}
-        </div>
+            {currentStep === 4 && (
+              <ExecutionPanel
+                config={config}
+                fabricDDL={fabricDDL}
+                onBack={() => setCurrentStep(3)}
+              />
+            )}
+          </div>
+        ) : (
+          <ColumnCompare />
+        )}
       </main>
 
       {/* Footer */}

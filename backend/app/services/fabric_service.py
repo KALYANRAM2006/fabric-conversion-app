@@ -265,3 +265,71 @@ class FabricService:
             self.disconnect()
             logger.error(f"Error executing DDL: {e}")
             return False, str(e)
+
+    def get_table_columns(self, schema, table_name):
+        """Get detailed column information for a table in Fabric"""
+        try:
+            success, _ = self.connect()
+            if not success:
+                raise Exception("Failed to connect to Fabric")
+
+            cursor = self.connection.cursor()
+
+            # Query system views for column information
+            query = """
+                SELECT
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.CHARACTER_MAXIMUM_LENGTH,
+                    c.NUMERIC_PRECISION,
+                    c.NUMERIC_SCALE,
+                    c.IS_NULLABLE,
+                    c.ORDINAL_POSITION
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                WHERE c.TABLE_SCHEMA = ?
+                  AND c.TABLE_NAME = ?
+                ORDER BY c.ORDINAL_POSITION
+            """
+
+            cursor.execute(query, (schema, table_name))
+
+            columns = []
+            for row in cursor.fetchall():
+                col_name, data_type, char_length, num_precision, num_scale, is_nullable, ordinal = row
+
+                # Format data type with length/precision
+                if data_type in ('varchar', 'char', 'nvarchar', 'nchar'):
+                    type_display = f"{data_type}({char_length if char_length else 'max'})"
+                elif data_type in ('decimal', 'numeric'):
+                    if num_precision and num_scale:
+                        type_display = f"{data_type}({num_precision},{num_scale})"
+                    elif num_precision:
+                        type_display = f"{data_type}({num_precision})"
+                    else:
+                        type_display = data_type
+                elif data_type in ('bigint', 'int', 'smallint', 'tinyint') and num_precision:
+                    type_display = f"{data_type}({num_precision})"
+                elif data_type in ('datetime2', 'datetimeoffset', 'time') and num_scale is not None:
+                    type_display = f"{data_type}({num_scale})"
+                else:
+                    type_display = data_type
+
+                columns.append({
+                    'column_name': col_name,
+                    'data_type': type_display,
+                    'data_length': char_length,
+                    'data_precision': num_precision,
+                    'data_scale': num_scale,
+                    'nullable': is_nullable,
+                    'column_id': ordinal
+                })
+
+            cursor.close()
+            self.disconnect()
+
+            return columns
+
+        except Exception as e:
+            self.disconnect()
+            logger.error(f"Error getting table columns from Fabric: {e}")
+            raise

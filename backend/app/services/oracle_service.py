@@ -202,3 +202,74 @@ class OracleService:
             self.disconnect()
             logger.error(f"Error extracting DDL: {e}")
             raise
+
+    def get_table_columns(self, schema, table_name):
+        """Get detailed column information for a table"""
+        try:
+            success, _ = self.connect()
+            if not success:
+                raise Exception("Failed to connect to Oracle")
+
+            cursor = self.connection.cursor()
+
+            query = """
+                SELECT
+                    COLUMN_NAME,
+                    DATA_TYPE,
+                    DATA_LENGTH,
+                    DATA_PRECISION,
+                    DATA_SCALE,
+                    NULLABLE,
+                    COLUMN_ID
+                FROM ALL_TAB_COLUMNS
+                WHERE OWNER = :schema
+                  AND TABLE_NAME = :table_name
+                ORDER BY COLUMN_ID
+            """
+
+            cursor.execute(query, {
+                'schema': schema.upper(),
+                'table_name': table_name.upper()
+            })
+
+            columns = []
+            for row in cursor.fetchall():
+                col_name, data_type, data_length, data_precision, data_scale, nullable, col_id = row
+
+                # Format data type with length/precision
+                if data_type in ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR'):
+                    type_display = f"{data_type}({data_length})"
+                elif data_type == 'NUMBER':
+                    if data_precision:
+                        if data_scale and data_scale > 0:
+                            type_display = f"NUMBER({data_precision},{data_scale})"
+                        else:
+                            type_display = f"NUMBER({data_precision})"
+                    else:
+                        type_display = "NUMBER"
+                elif data_type == 'DATE':
+                    type_display = f"DATE(7)"
+                elif data_type.startswith('TIMESTAMP'):
+                    type_display = data_type
+                else:
+                    type_display = data_type
+
+                columns.append({
+                    'column_name': col_name,
+                    'data_type': type_display,
+                    'data_length': data_length,
+                    'data_precision': data_precision,
+                    'data_scale': data_scale,
+                    'nullable': 'YES' if nullable == 'Y' else 'NO',
+                    'column_id': col_id
+                })
+
+            cursor.close()
+            self.disconnect()
+
+            return columns
+
+        except Exception as e:
+            self.disconnect()
+            logger.error(f"Error getting table columns: {e}")
+            raise

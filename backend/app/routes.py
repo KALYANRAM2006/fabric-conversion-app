@@ -440,3 +440,75 @@ def create_tables_batch():
     except Exception as e:
         logger.error(f"Error creating tables: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/compare-columns', methods=['POST'])
+def compare_columns():
+    """Compare columns between two tables (Oracle-to-Oracle or Oracle-to-Fabric)"""
+    try:
+        data = request.json
+        left = data.get('left', {})
+        right = data.get('right', {})
+
+        # Get left side columns
+        if left.get('type') == 'oracle':
+            left_creds = get_database_credentials(left.get('database'))
+            if not left_creds:
+                return jsonify({'error': f'Left database {left.get("database")} not configured'}), 400
+
+            left_oracle = OracleService(
+                user=left_creds['user'],
+                password=left_creds['password'],
+                dsn=left_creds['dsn']
+            )
+            left_columns = left_oracle.get_table_columns(left.get('schema'), left.get('table'))
+        else:  # fabric
+            # Use provided Fabric server/database or fall back to environment
+            fabric_server = left.get('fabricServer') or os.getenv('FABRIC_SERVER')
+            fabric_database = left.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
+            fabric_username = left.get('fabricUsername') or os.getenv('FABRIC_USERNAME')
+            fabric_password = left.get('fabricPassword') or os.getenv('FABRIC_PASSWORD')
+            left_fabric = FabricService(
+                server=fabric_server,
+                database=fabric_database,
+                username=fabric_username,
+                password=fabric_password
+            )
+            left_columns = left_fabric.get_table_columns(left.get('schema'), left.get('table'))
+
+        # Get right side columns
+        if right.get('type') == 'oracle':
+            right_creds = get_database_credentials(right.get('database'))
+            if not right_creds:
+                return jsonify({'error': f'Right database {right.get("database")} not configured'}), 400
+
+            right_oracle = OracleService(
+                user=right_creds['user'],
+                password=right_creds['password'],
+                dsn=right_creds['dsn']
+            )
+            right_columns = right_oracle.get_table_columns(right.get('schema'), right.get('table'))
+        else:  # fabric
+            # Use provided Fabric server/database or fall back to environment
+            fabric_server = right.get('fabricServer') or os.getenv('FABRIC_SERVER')
+            fabric_database = right.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
+            fabric_username = right.get('fabricUsername') or os.getenv('FABRIC_USERNAME')
+            fabric_password = right.get('fabricPassword') or os.getenv('FABRIC_PASSWORD')
+            right_fabric = FabricService(
+                server=fabric_server,
+                database=fabric_database,
+                username=fabric_username,
+                password=fabric_password
+            )
+            right_columns = right_fabric.get_table_columns(right.get('schema'), right.get('table'))
+
+        return jsonify({
+            'left_columns': left_columns,
+            'right_columns': right_columns,
+            'left_info': left,
+            'right_info': right
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error comparing columns: {e}")
+        return jsonify({'error': str(e)}), 500

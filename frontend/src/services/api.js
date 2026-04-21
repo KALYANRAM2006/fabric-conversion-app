@@ -60,4 +60,8 @@ export const createTable = (payload) =>
 export const createTablesBatch = (payload) =>
   api.post('/create-tables-batch', payload)
 
+// Column Comparison
+export const compareColumns = (payload) =>
+  api.post('/compare-columns', payload)
+
 export default api

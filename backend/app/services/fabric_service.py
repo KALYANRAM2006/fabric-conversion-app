@@ -131,33 +131,56 @@ def _token_bytes(token_str):
 
 
 class FabricService:
-    def __init__(self, server, database):
+    def __init__(self, server, database, client_id=None, client_secret=None, use_cli_auth=None):
         self.server = server
         self.database = database
+        self.client_id = client_id
+        self.client_secret = client_secret
+        # Auto-detect auth method: use service principal if credentials provided, else CLI
+        if use_cli_auth is None:
+            self.use_cli_auth = not (client_id and client_secret)
+        else:
+            self.use_cli_auth = use_cli_auth
         self.connection = None
 
     def connect(self):
-        """Establish Fabric connection using Azure CLI token"""
+        """Establish Fabric connection using Service Principal or Azure CLI token"""
         try:
-            # Get access token from Azure CLI
-            logger.info("Getting Azure AD token via Azure CLI...")
-            access_token = _get_fabric_token()
+            if self.use_cli_auth:
+                # Azure CLI token authentication
+                logger.info("Using Azure CLI token authentication...")
+                access_token = _get_fabric_token()
 
-            connection_string = (
-                f"DRIVER={{ODBC Driver 18 for SQL Server}};"
-                f"SERVER={self.server};"
-                f"DATABASE={self.database};"
-                f"Encrypt=yes;"
-                f"TrustServerCertificate=no;"
-            )
+                connection_string = (
+                    f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                    f"SERVER={self.server};"
+                    f"DATABASE={self.database};"
+                    f"Encrypt=yes;"
+                    f"TrustServerCertificate=no;"
+                )
 
-            # Use token-based auth (SQL_COPT_SS_ACCESS_TOKEN = 1256)
-            SQL_COPT_SS_ACCESS_TOKEN = 1256
-            self.connection = pyodbc.connect(
-                connection_string,
-                attrs_before={SQL_COPT_SS_ACCESS_TOKEN: _token_bytes(access_token)},
-                timeout=30
-            )
+                # Use token-based auth (SQL_COPT_SS_ACCESS_TOKEN = 1256)
+                SQL_COPT_SS_ACCESS_TOKEN = 1256
+                self.connection = pyodbc.connect(
+                    connection_string,
+                    attrs_before={SQL_COPT_SS_ACCESS_TOKEN: _token_bytes(access_token)},
+                    timeout=30
+                )
+            else:
+                # Service Principal authentication
+                logger.info("Using Service Principal authentication...")
+                connection_string = (
+                    f"DRIVER={{ODBC Driver 18 for SQL Server}};"
+                    f"SERVER={self.server};"
+                    f"DATABASE={self.database};"
+                    f"Authentication=ActiveDirectoryServicePrincipal;"
+                    f"UID={self.client_id};"
+                    f"PWD={self.client_secret};"
+                    f"Encrypt=yes;"
+                    f"TrustServerCertificate=no;"
+                )
+                self.connection = pyodbc.connect(connection_string, timeout=30)
+
             return True, "Connected successfully"
 
         except Exception as e:

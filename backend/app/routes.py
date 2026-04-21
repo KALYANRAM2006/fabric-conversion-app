@@ -223,9 +223,13 @@ def test_fabric():
     """Test Fabric Data Warehouse connection"""
     try:
         data = request.json
+        client_id = os.getenv('FABRIC_CLIENT_ID')
+        client_secret = os.getenv('FABRIC_CLIENT_SECRET')
         fabric_service = FabricService(
             server=data.get('server'),
-            database=data.get('database')
+            database=data.get('database'),
+            client_id=client_id,
+            client_secret=client_secret
         )
 
         success, message = fabric_service.test_connection()
@@ -245,9 +249,13 @@ def get_fabric_schemas():
     """Get available schemas from Fabric Data Warehouse"""
     try:
         data = request.json
+        client_id = os.getenv('FABRIC_CLIENT_ID')
+        client_secret = os.getenv('FABRIC_CLIENT_SECRET')
         fabric_service = FabricService(
             server=data.get('server'),
-            database=data.get('database')
+            database=data.get('database'),
+            client_id=client_id,
+            client_secret=client_secret
         )
 
         success, message, schemas = fabric_service.get_schemas()
@@ -388,10 +396,14 @@ def create_table():
         data = request.json
         server = data.get('fabric', {}).get('server') or os.getenv('FABRIC_SERVER', '')
         database = data.get('fabric', {}).get('database') or os.getenv('FABRIC_DATABASE', '')
+        client_id = os.getenv('FABRIC_CLIENT_ID')
+        client_secret = os.getenv('FABRIC_CLIENT_SECRET')
         logger.info(f"Creating table - server={server[:30]}... db={database}")
         fabric_service = FabricService(
             server=server,
-            database=database
+            database=database,
+            client_id=client_id,
+            client_secret=client_secret
         )
 
         schema = data.get('schema', 'dbo')
@@ -417,10 +429,14 @@ def create_tables_batch():
         data = request.json
         server = data.get('fabric', {}).get('server') or os.getenv('FABRIC_SERVER', '')
         database = data.get('fabric', {}).get('database') or os.getenv('FABRIC_DATABASE', '')
+        client_id = os.getenv('FABRIC_CLIENT_ID')
+        client_secret = os.getenv('FABRIC_CLIENT_SECRET')
         logger.info(f"Batch create - server={server[:30]}... db={database}")
         fabric_service = FabricService(
             server=server,
-            database=database
+            database=database,
+            client_id=client_id,
+            client_secret=client_secret
         )
 
         schema = data.get('schema', 'dbo')
@@ -466,9 +482,14 @@ def compare_columns():
             # Use provided Fabric server/database or fall back to environment
             fabric_server = left.get('fabricServer') or os.getenv('FABRIC_SERVER')
             fabric_database = left.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
+            # Service Principal credentials (optional)
+            client_id = os.getenv('FABRIC_CLIENT_ID')
+            client_secret = os.getenv('FABRIC_CLIENT_SECRET')
             left_fabric = FabricService(
                 server=fabric_server,
-                database=fabric_database
+                database=fabric_database,
+                client_id=client_id,
+                client_secret=client_secret
             )
             left_columns = left_fabric.get_table_columns(left.get('schema'), left.get('table'))
 
@@ -488,9 +509,14 @@ def compare_columns():
             # Use provided Fabric server/database or fall back to environment
             fabric_server = right.get('fabricServer') or os.getenv('FABRIC_SERVER')
             fabric_database = right.get('fabricDatabase') or os.getenv('FABRIC_DATABASE')
+            # Service Principal credentials (optional)
+            client_id = os.getenv('FABRIC_CLIENT_ID')
+            client_secret = os.getenv('FABRIC_CLIENT_SECRET')
             right_fabric = FabricService(
                 server=fabric_server,
-                database=fabric_database
+                database=fabric_database,
+                client_id=client_id,
+                client_secret=client_secret
             )
             right_columns = right_fabric.get_table_columns(right.get('schema'), right.get('table'))
 
